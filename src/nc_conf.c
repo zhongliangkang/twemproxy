@@ -1219,7 +1219,7 @@ conf_validate_server(struct conf *cf, struct conf_pool *cp)
             log_error("conf: pool '%.*s' has servers with same name '%.*s'",
                       cp->name.len, cp->name.data, cs1->name.len, 
                       cs1->name.data);
-            valid = false;
+            //valid = false;
             break;
         }
     }

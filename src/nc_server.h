@@ -182,6 +182,7 @@ int sp_get_by_item(char *sp_name, char *sp_item ,char *result, void *sp);
 
 
 int server_pool_get_config_by_string(struct server_pool *sp, struct string *item, char * result);
+uint32_t server_gethashval(char *key);
 int server_pool_getkey_by_keyid(void *sp_p, char *sp_name, char* key, char * result);
 
 /* send the auth package to redis server */

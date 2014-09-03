@@ -835,6 +835,16 @@ stats_send_rsp(struct stats *st)
 
     }else if(!strcmp(cmd_p[0],"delete")){    /* delete server */
         printf("delete!\n");
+    }else if(!strcmp(cmd_p[0],"gethashval") && n_field == 2){    /* delete server */
+        uint32_t rt;
+        log_debug(LOG_VERB,"gethashval: %s\n",cmd_p[1]);
+
+        rt=server_gethashval(cmd_p[1]);
+        snprintf(result,100,"%u",rt);
+
+        log_debug(LOG_VERB,"hash value: %s\n",result);
+
+        n = nc_sendn(sd, result, strlen(result));
     }else if(!strcmp(cmd_p[0],"getkey") && n_field == 3){  /* get hashkey  backend's info */
         int rt;
         rt = server_pool_getkey_by_keyid(st->p_sp, cmd_p[1], cmd_p[2], result);

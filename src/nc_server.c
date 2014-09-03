@@ -1385,6 +1385,12 @@ rstatus_t server_check_hash_keys( struct server_pool *sp){
     return NC_OK;
 }
 
+uint32_t server_gethashval(char *key){
+    uint32_t val = hash_fnv1a_64( (char *)key, strlen((char *)key));
+    val %= MODHASH_TOTAL_KEY;
+
+    return val;
+}
 
 int server_pool_getkey_by_keyid(void *sp_p,char *sp_name, char *key_s, char * result){
     uint32_t key, n_sp, i;
@@ -1514,7 +1520,7 @@ int nc_server_change_instance(void *sp_a, char *sp_name, char *old_instance, cha
                         (svr->reload_svr && !nc_strncmp( svr->mif.new_name, new_instance, strlen(new_instance)))){
                     is_newsvr_exist = true;
                     newsvr_index = j;
-                    snprintf(result,80,"server %s already exits in server pool %s\n",old_instance, sp_name );
+                    snprintf(result,80,"server %s already exits in server pool %s\n", new_instance, sp_name );
                     return NC_ERROR;
                 }
             }
@@ -1529,63 +1535,75 @@ int nc_server_change_instance(void *sp_a, char *sp_name, char *old_instance, cha
 
             // first change the content of svr, then close all the connections of svr
             //
-            /* sockinfo */
 
-            ski = (void *)nc_alloc(sizeof(struct sockinfo));
-            if( !ski){
-                return NC_ENOMEM;
+            // maybe 1 instance appear multi-times,we should process it one by one
+
+            for ( j=0; j<m; j++){
+                svr = array_get(&sp->server, j);
+
+                //find the index
+                if(! nc_strncmp( svr->name.data, old_instance, strlen(old_instance)) || 
+                        (svr->reload_svr && !nc_strncmp( svr->mif.new_name, old_instance, strlen(old_instance)))){
+                    oldsvr_index = j;
+
+                /* sockinfo */
+                ski = (void *)nc_alloc(sizeof(struct sockinfo));
+                if( !ski){
+                    return NC_ENOMEM;
+                }
+
+                new_name = (void *) nc_alloc(1024);
+                if( !new_name ){
+                    nc_free(ski);
+                    return NC_ENOMEM;
+                }
+
+                new_pname = (void *) nc_alloc(1024);
+                if( !new_pname ){
+                    nc_free(ski);
+                    nc_free(new_name);
+                    return NC_ENOMEM;
+                }
+
+
+                snprintf(new_pname,1024,"%s:1 %s %d-%d %d",new_instance,svr->app.data,svr->seg_start,svr->seg_end,svr->status);
+                snprintf(new_name,1024,"%s:%d",new_ip,new_port );
+
+                string_init(&addr);
+                rt = string_copy(&addr, new_ip, strlen(new_ip));
+                if(rt != NC_OK){
+                    goto err;
+                }
+
+                rt = nc_resolve(&addr, new_port, ski);
+                if(rt != NC_OK){
+                    goto err;
+                }
+
+                // step 1: first write new config file
+                sp_write_conf_file(sp, i, j, new_pname);
+
+                /* save new backend information for main thread to modify, thread lock for safe */
+                pthread_mutex_lock(&svr->mutex);
+
+                // step 2: modify the meminfo,and change the reload_svr flag for loading new config
+                if( svr->reload_svr){  /* modify the instance info,but the old modification has not reload,free the svr->mif */
+                    nc_free(svr->mif.ski);
+                    nc_free(svr->mif.new_name);
+                    nc_free(svr->mif.new_pname);
+                }  /* else: the prev modification has reload,need not to free the old mif info */
+
+                svr->mif.ski = ski;
+                svr->mif.new_name = new_name;
+                svr->mif.new_pname= new_pname;
+                svr->reload_svr = true;
+
+                pthread_mutex_unlock(&svr->mutex);
+
+                snprintf(result, 1024, "change banckends from ' %s ' to  ' %s ' success.\n",old_instance, new_instance);
+                loga("change sucess: %s\n",result);
+                }
             }
-
-            new_name = (void *) nc_alloc(1024);
-            if( !new_name ){
-                nc_free(ski);
-                return NC_ENOMEM;
-            }
-
-            new_pname = (void *) nc_alloc(1024);
-            if( !new_pname ){
-                nc_free(ski);
-                nc_free(new_name);
-                return NC_ENOMEM;
-            }
-
-
-            snprintf(new_pname,1024,"%s:1 %s %d-%d %d",new_instance, svr->app.data, svr->seg_start, svr->seg_end, svr->status);
-            snprintf(new_name,1024,"%s:%d",new_ip,new_port );
-
-            string_init(&addr);
-            rt = string_copy(&addr, new_ip, strlen(new_ip));
-            if(rt != NC_OK){
-                goto err;
-            }
-
-            rt = nc_resolve(&addr, new_port, ski);
-            if(rt != NC_OK){
-                goto err;
-            }
-
-            // step 1: first write new config file
-            sp_write_conf_file(sp, i, j, new_pname);
-
-            /* save new backend information for main thread to modify, thread lock for safe */
-            pthread_mutex_lock(&svr->mutex);
-
-            // step 2: modify the meminfo,and change the reload_svr flag for loading new config
-            if( svr->reload_svr){  /* modify the instance info,but the old modification has not reload,free the svr->mif */
-                nc_free(svr->mif.ski);
-                nc_free(svr->mif.new_name);
-                nc_free(svr->mif.new_pname);
-            }  /* else: the prev modification has reload,need not to free the old mif info */
-
-            svr->mif.ski = ski;
-            svr->mif.new_name = new_name;
-            svr->mif.new_pname= new_pname;
-            svr->reload_svr = true;
-
-            pthread_mutex_unlock(&svr->mutex);
-
-            snprintf(result, 1024, "change banckends from ' %s ' to  ' %s ' success.\n",old_instance, new_instance);
-            loga("change sucess: %s\n",result);
             return NC_OK;
 
         }
